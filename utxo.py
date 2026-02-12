@@ -1,0 +1,2 @@
+class UTXOSet:
+    pass
