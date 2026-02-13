@@ -14,6 +14,11 @@ class Mempool:
                 conflicts.append(existing)
         return conflicts
 
+    def _evict(self):
+        while self.current_size > self.max_size and self.tx_pool:
+            worst = min(self.tx_pool.values(), key=lambda tx: tx.fee_rate)
+            self.remove_transaction(worst.txid)
+
     def add_transaction(self, tx, utxo_set):
         if tx.txid in self.tx_pool:
             return False, "already in mempool"
@@ -26,9 +31,6 @@ class Mempool:
             if tx.fee_rate <= conflict.fee_rate:
                 return False, f"fee rate not higher than {conflict.txid}"
 
-        if self.current_size + tx.size > self.max_size:
-            return False, "mempool full"
-
         valid, err = utxo_set.validate_transaction(tx)
         if not valid:
             return False, err
@@ -39,6 +41,10 @@ class Mempool:
 
         self.tx_pool[tx.txid] = tx
         self.current_size += tx.size
+
+        # evict lowest fee_rate txs if over limit
+        self._evict()
+
         return True, None
 
     def remove_transaction(self, txid):
