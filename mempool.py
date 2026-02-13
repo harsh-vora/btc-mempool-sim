@@ -4,9 +4,27 @@ class Mempool:
         self.max_size = max_size
         self.current_size = 0
 
+    def _find_conflicts(self, tx):
+        """Find existing txs that spend the same inputs."""
+        new_inputs = {(inp.txid, inp.index) for inp in tx.inputs}
+        conflicts = []
+        for existing in self.tx_pool.values():
+            existing_inputs = {(inp.txid, inp.index) for inp in existing.inputs}
+            if new_inputs & existing_inputs:
+                conflicts.append(existing)
+        return conflicts
+
     def add_transaction(self, tx, utxo_set):
         if tx.txid in self.tx_pool:
             return False, "already in mempool"
+
+        # check for RBF conflicts
+        conflicts = self._find_conflicts(tx)
+        for conflict in conflicts:
+            if not conflict.replaceable:
+                return False, f"conflicts with non-replaceable tx {conflict.txid}"
+            if tx.fee_rate <= conflict.fee_rate:
+                return False, f"fee rate not higher than {conflict.txid}"
 
         if self.current_size + tx.size > self.max_size:
             return False, "mempool full"
@@ -14,6 +32,10 @@ class Mempool:
         valid, err = utxo_set.validate_transaction(tx)
         if not valid:
             return False, err
+
+        # evict conflicting txs
+        for conflict in conflicts:
+            self.remove_transaction(conflict.txid)
 
         self.tx_pool[tx.txid] = tx
         self.current_size += tx.size
